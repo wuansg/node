@@ -22,9 +22,9 @@ import {
     GetUsersIpListResponseModel,
     GetUsersStatsResponseModel,
 } from './models';
-import { SingBoxStatsService } from './sing-box/sing-box-stats.service';
 import { GetInterfaceStatsQuery } from '../network-stats/queries/get-interface-stats/get-interface-stats.query';
 import { GetTorrentBlockerReportsCountQuery } from '../_plugin/queries/get-torrent-blocker-reports-count';
+import { SingBoxStatsService } from './sing-box/sing-box-stats.service';
 import { IGetUserOnlineStatusRequest } from './interfaces';
 import { XrayService } from '../xray-core/xray.service';
 
@@ -87,9 +87,7 @@ export class StatsService {
                     response: new GetSystemStatsResponseModel(
                         {
                             numGoroutine:
-                                singBoxSysStats.numGoroutine ??
-                                singBoxSysStats.num_goroutine ??
-                                0,
+                                singBoxSysStats.numGoroutine ?? singBoxSysStats.num_goroutine ?? 0,
                             numGC:
                                 singBoxSysStats.numGC ??
                                 singBoxSysStats.numGc ??
@@ -104,9 +102,7 @@ export class StatsService {
                             liveObjects:
                                 singBoxSysStats.liveObjects ?? singBoxSysStats.live_objects ?? 0,
                             pauseTotalNs:
-                                singBoxSysStats.pauseTotalNs ??
-                                singBoxSysStats.pause_total_ns ??
-                                0,
+                                singBoxSysStats.pauseTotalNs ?? singBoxSysStats.pause_total_ns ?? 0,
                             uptime: singBoxSysStats.uptime ?? 0,
                         },
                         {

@@ -2,8 +2,8 @@ import { loadSync } from '@grpc/proto-loader';
 import * as grpc from '@grpc/grpc-js';
 import { join } from 'node:path';
 
-import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Injectable } from '@nestjs/common';
 
 import { IInboundStat, IOutboundStat, IUserStat } from '../models/interfaces';
 
@@ -67,7 +67,7 @@ export class SingBoxStatsService {
             longs: Number,
             oneofs: true,
         });
-        const descriptor = grpc.loadPackageDefinition(packageDefinition) as {
+        const descriptor = grpc.loadPackageDefinition(packageDefinition) as unknown as {
             v2ray: {
                 core: {
                     app: {
@@ -204,13 +204,11 @@ export class SingBoxStatsService {
         });
     }
 
-    private parseNamedStat(name: string):
-        | {
-              kind: 'inbound' | 'outbound' | 'user';
-              tag: string;
-              direction: 'downlink' | 'uplink';
-          }
-        | null {
+    private parseNamedStat(name: string): {
+        kind: 'inbound' | 'outbound' | 'user';
+        tag: string;
+        direction: 'downlink' | 'uplink';
+    } | null {
         const match = /^(inbound|outbound|user)>>>(.+?)>>>traffic>>>(uplink|downlink)$/.exec(name);
         if (!match) return null;
 

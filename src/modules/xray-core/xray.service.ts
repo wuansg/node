@@ -1,13 +1,13 @@
 import { ProcessInfo } from '@kastov/node-supervisord/dist/interfaces';
 import { SupervisordClient } from '@kastov/node-supervisord';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
 import { readPackageJSON } from 'pkg-types';
+import { promisify } from 'node:util';
 import { table } from 'table';
 import ems from 'enhanced-ms';
 import pRetry from 'p-retry';
 import semver from 'semver';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { mkdir, writeFile } from 'node:fs/promises';
 
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
