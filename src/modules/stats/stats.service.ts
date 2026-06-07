@@ -402,9 +402,10 @@ export class StatsService {
     ): Promise<ICommandResponse<GetUserIpListResponseModel>> {
         try {
             if (this.xrayService.getRunningCore() === 'SING_BOX') {
+                const ips = await this.singBoxStatsService.getUserIpList(userId);
                 return {
                     isOk: true,
-                    response: new GetUserIpListResponseModel([]),
+                    response: new GetUserIpListResponseModel(ips),
                 };
             }
 
@@ -441,9 +442,10 @@ export class StatsService {
     public async getUsersIpList(): Promise<ICommandResponse<GetUsersIpListResponseModel>> {
         try {
             if (this.xrayService.getRunningCore() === 'SING_BOX') {
+                const usersIps = await this.singBoxStatsService.getAllUsersOnlineIps();
                 return {
                     isOk: true,
-                    response: new GetUsersIpListResponseModel([]),
+                    response: new GetUsersIpListResponseModel(usersIps),
                 };
             }
 

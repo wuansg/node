@@ -20,6 +20,15 @@ interface RawGetStatsResponse {
     stat?: RawStat;
 }
 
+interface RawGetStatsOnlineIpListResponse {
+    name?: string;
+    ips?: Record<string, number | string | { toNumber?: () => number }>;
+}
+
+interface RawGetAllOnlineUsersResponse {
+    users?: string[];
+}
+
 interface RawSysStatsResponse {
     numGoroutine?: number;
     num_goroutine?: number;
@@ -46,11 +55,23 @@ interface StatsClient {
         request: { name: string; reset: boolean },
         callback: GrpcCallback<RawGetStatsResponse>,
     ): void;
+    getStatsOnline(
+        request: { name: string; reset: boolean },
+        callback: GrpcCallback<RawGetStatsResponse>,
+    ): void;
     queryStats(
         request: { pattern: string; reset: boolean },
         callback: GrpcCallback<RawQueryStatsResponse>,
     ): void;
     getSysStats(request: Record<string, never>, callback: GrpcCallback<RawSysStatsResponse>): void;
+    getStatsOnlineIpList(
+        request: { name: string; reset: boolean },
+        callback: GrpcCallback<RawGetStatsOnlineIpListResponse>,
+    ): void;
+    getAllOnlineUsers(
+        request: Record<string, never>,
+        callback: GrpcCallback<RawGetAllOnlineUsersResponse>,
+    ): void;
     close(): void;
 }
 
@@ -98,6 +119,31 @@ export class SingBoxStatsService {
     public async getUserOnlineStatus(username: string): Promise<boolean> {
         const stat = await this.getStat(`user>>>${username}>>>traffic>>>uplink`, false);
         return !!stat;
+    }
+
+    public async getUserIpList(username: string): Promise<{ ip: string; lastSeen: Date }[]> {
+        const response = await this.call<RawGetStatsOnlineIpListResponse>((callback) =>
+            this.client.getStatsOnlineIpList(
+                {
+                    name: `user>>>${username}>>>online`,
+                    reset: true,
+                },
+                callback,
+            ),
+        );
+
+        return Object.entries(response.ips ?? {}).map(([ip, timestamp]) => ({
+            ip,
+            lastSeen: new Date(this.toNumber(timestamp) * 1000),
+        }));
+    }
+
+    public async getAllOnlineUsers(): Promise<string[]> {
+        const response = await this.call<RawGetAllOnlineUsersResponse>((callback) =>
+            this.client.getAllOnlineUsers({}, callback),
+        );
+
+        return response.users ?? [];
     }
 
     public async getAllUsersStats(reset: boolean): Promise<IUserStat[]> {
@@ -176,6 +222,32 @@ export class SingBoxStatsService {
         }
 
         return Array.from(grouped.values());
+    }
+
+    public async getAllUsersOnlineIps(): Promise<
+        Array<{
+            email: string;
+            ips: Array<{ ip: string; lastSeen: number }>;
+        }>
+    > {
+        const onlineUsers = await this.getAllOnlineUsers();
+
+        return Promise.all(
+            onlineUsers.map(async (email) => {
+                try {
+                    const ips = await this.getUserIpList(email);
+                    return {
+                        email,
+                        ips: ips.map((ip) => ({
+                            ip: ip.ip,
+                            lastSeen: Math.floor(ip.lastSeen.getTime() / 1000),
+                        })),
+                    };
+                } catch {
+                    return { email, ips: [] };
+                }
+            }),
+        );
     }
 
     private async getStat(name: string, reset: boolean): Promise<number> {
