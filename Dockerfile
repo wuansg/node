@@ -23,6 +23,17 @@ RUN echo '#!/bin/sh' > /usr/local/bin/xerrors \
     && chmod +x /usr/local/bin/xerrors
 
 
+FROM golang:1.25-alpine AS sing-box-build
+
+ARG SING_BOX_VERSION=v1.12.0
+
+WORKDIR /src
+
+RUN apk add --no-cache git build-base \
+    && git clone --depth 1 --branch ${SING_BOX_VERSION} https://github.com/SagerNet/sing-box.git . \
+    && go build -tags "with_v2ray_api" -o /usr/local/bin/sing-box ./cmd/sing-box
+
+
 FROM node:24.14-alpine
 
 LABEL org.opencontainers.image.title="Remnawave Node"
@@ -41,6 +52,7 @@ COPY --from=build /usr/local/share/xray/geoip.dat /usr/local/share/xray/geoip.da
 COPY --from=build /usr/local/share/xray/geosite.dat /usr/local/share/xray/geosite.dat
 COPY --from=build /usr/local/bin/xlogs /usr/local/bin/xlogs
 COPY --from=build /usr/local/bin/xerrors /usr/local/bin/xerrors
+COPY --from=sing-box-build /usr/local/bin/sing-box /usr/local/bin/sing-box
 
 COPY supervisord.conf /etc/supervisord.conf
 COPY docker-entrypoint.sh /usr/local/bin/
@@ -52,6 +64,13 @@ RUN apk add --no-cache supervisor libnftnl libmnl && \
     chmod +x /usr/local/bin/docker-entrypoint.sh && \
     ln -s /usr/local/bin/xray /usr/local/bin/rw-core
 
+RUN echo '#!/bin/sh' > /usr/local/bin/sblogs \
+    && echo 'tail -n +1 -f /var/log/supervisor/sing-box.out.log' >> /usr/local/bin/sblogs \
+    && chmod +x /usr/local/bin/sblogs \
+    && echo '#!/bin/sh' > /usr/local/bin/sberrors \
+    && echo 'tail -n +1 -f /var/log/supervisor/sing-box.err.log' >> /usr/local/bin/sberrors \
+    && chmod +x /usr/local/bin/sberrors
+
 RUN npm ci --omit=dev --legacy-peer-deps \
     && npm cache clean --force \
     && npm link
@@ -61,6 +80,7 @@ ENV NODE_OPTIONS="--max-http-header-size=65536"
 ENV UV_THREADPOOL_SIZE=24
 
 ENV XTLS_API_PORT=61000
+ENV SING_BOX_API_PORT=61001
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 

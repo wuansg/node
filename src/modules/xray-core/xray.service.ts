@@ -5,6 +5,9 @@ import { table } from 'table';
 import ems from 'enhanced-ms';
 import pRetry from 'p-retry';
 import semver from 'semver';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdir, writeFile } from 'node:fs/promises';
 
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
@@ -31,6 +34,9 @@ import { GetTorrentBlockerStateQuery } from '../_plugin/queries/get-torrent-bloc
 import { InternalService } from '../internal/internal.service';
 
 const XRAY_PROCESS_NAME = 'xray' as const;
+const SING_BOX_PROCESS_NAME = 'sing-box' as const;
+const SING_BOX_CONFIG_PATH = '/run/remnawave/sing-box.json' as const;
+const execFileAsync = promisify(execFile);
 
 @Injectable()
 export class XrayService implements OnApplicationBootstrap {
@@ -42,9 +48,13 @@ export class XrayService implements OnApplicationBootstrap {
     };
 
     private readonly xrayPath: string;
+    private readonly singBoxPath: string;
 
     private xrayVersion: null | string = null;
+    private singBoxVersion: null | string = null;
+    private runningCore: 'SING_BOX' | 'XRAY' | null = null;
     private isXrayOnline: boolean = false;
+    private isSingBoxOnline: boolean = false;
     private isXrayStartedProccesing: boolean = false;
     private nodeVersion: string = '0.0.0';
     constructor(
@@ -61,7 +71,9 @@ export class XrayService implements OnApplicationBootstrap {
         };
 
         this.xrayPath = '/usr/local/bin/xray';
+        this.singBoxPath = '/usr/local/bin/sing-box';
         this.xrayVersion = null;
+        this.singBoxVersion = null;
 
         this.isXrayStartedProccesing = false;
         this.disableHashedSetCheck = this.configService.getOrThrow<boolean>(
@@ -74,6 +86,7 @@ export class XrayService implements OnApplicationBootstrap {
             const pkg = await readPackageJSON();
 
             this.xrayVersion = this.getXrayVersionFromEnv();
+            this.singBoxVersion = await this.getSingBoxVersion();
             this.nodeVersion = pkg.version ?? '0.0.0';
 
             await this.supervisordApi.getState();
@@ -106,7 +119,15 @@ export class XrayService implements OnApplicationBootstrap {
             interface: interfaceStats,
         };
 
+        if (body.coreType === 'SING_BOX') {
+            return this.startSingBox(body, ip, system, tm);
+        }
+
         try {
+            if (!body.xrayConfig) {
+                throw new Error('xrayConfig is required for XRAY core');
+            }
+
             if (this.isXrayStartedProccesing) {
                 this.logger.warn('Request already in progress');
                 return {
@@ -154,6 +175,8 @@ export class XrayService implements OnApplicationBootstrap {
                     };
                 }
             }
+
+            await this.stopSingBoxProcess();
 
             if (body.internals.forceRestart) {
                 this.logger.warn('Force restart requested');
@@ -240,6 +263,8 @@ export class XrayService implements OnApplicationBootstrap {
             }
 
             this.isXrayOnline = true;
+            this.isSingBoxOnline = false;
+            this.runningCore = 'XRAY';
 
             this.logger.log(
                 '\n' +
@@ -267,6 +292,11 @@ export class XrayService implements OnApplicationBootstrap {
                         version: this.nodeVersion,
                     },
                     system,
+                    'XRAY',
+                    {
+                        xray: this.xrayVersion,
+                        singBox: this.singBoxVersion,
+                    },
                 ),
             };
         } catch (error) {
@@ -287,6 +317,11 @@ export class XrayService implements OnApplicationBootstrap {
                         version: this.nodeVersion,
                     },
                     system,
+                    'XRAY',
+                    {
+                        xray: null,
+                        singBox: this.singBoxVersion,
+                    },
                 ),
             };
         } finally {
@@ -320,8 +355,11 @@ export class XrayService implements OnApplicationBootstrap {
             }
 
             await this.killAllXrayProcesses();
+            await this.stopSingBoxProcess();
 
             this.isXrayOnline = false;
+            this.isSingBoxOnline = false;
+            this.runningCore = null;
             this.internalService.cleanup();
 
             return {
@@ -343,9 +381,14 @@ export class XrayService implements OnApplicationBootstrap {
                 isOk: true,
                 response: new GetNodeHealthCheckResponseModel(
                     true,
-                    this.isXrayOnline,
+                    this.runningCore === 'XRAY' ? this.isXrayOnline : this.isSingBoxOnline,
                     this.xrayVersion,
                     this.nodeVersion,
+                    this.runningCore,
+                    {
+                        xray: this.xrayVersion,
+                        singBox: this.singBoxVersion,
+                    },
                 ),
             };
         } catch (error) {
@@ -353,7 +396,17 @@ export class XrayService implements OnApplicationBootstrap {
 
             return {
                 isOk: true,
-                response: new GetNodeHealthCheckResponseModel(false, false, null, this.nodeVersion),
+                response: new GetNodeHealthCheckResponseModel(
+                    false,
+                    false,
+                    null,
+                    this.nodeVersion,
+                    this.runningCore,
+                    {
+                        xray: this.xrayVersion,
+                        singBox: this.singBoxVersion,
+                    },
+                ),
             };
         }
     }
@@ -365,6 +418,236 @@ export class XrayService implements OnApplicationBootstrap {
             this.logger.log('Supervisord: Xray processes killed.');
         } catch (error) {
             this.logger.log(`Supervisord: No existing Xray processes found. Error: ${error}`);
+        }
+    }
+
+    public getRunningCore(): 'SING_BOX' | 'XRAY' | null {
+        return this.runningCore;
+    }
+
+    private async startSingBox(
+        body: StartXrayCommand.Request,
+        ip: string,
+        system: StartXrayResponseModel['system'],
+        tm: number,
+    ): Promise<ICommandResponse<StartXrayResponseModel>> {
+        try {
+            if (!body.singBoxConfig) {
+                throw new Error('singBoxConfig is required for SING_BOX core');
+            }
+
+            if (this.isXrayStartedProccesing) {
+                return {
+                    isOk: true,
+                    response: new StartXrayResponseModel(
+                        false,
+                        this.singBoxVersion,
+                        'Request already in progress',
+                        { version: this.nodeVersion },
+                        system,
+                        'SING_BOX',
+                        {
+                            xray: this.xrayVersion,
+                            singBox: this.singBoxVersion,
+                        },
+                    ),
+                };
+            }
+
+            this.isXrayStartedProccesing = true;
+
+            await this.killAllXrayProcesses();
+            const singBoxConfig = this.generateSingBoxApiConfig(body.singBoxConfig);
+
+            await mkdir('/run/remnawave', { recursive: true });
+            await writeFile(SING_BOX_CONFIG_PATH, JSON.stringify(singBoxConfig), 'utf-8');
+
+            await this.internalService.extractUsersFromSingBoxConfig(
+                body.internals.hashes,
+                singBoxConfig,
+            );
+
+            const process = await this.restartSingBoxProcess();
+
+            if (process.error) {
+                return {
+                    isOk: true,
+                    response: new StartXrayResponseModel(
+                        false,
+                        this.singBoxVersion,
+                        process.error,
+                        { version: this.nodeVersion },
+                        system,
+                        'SING_BOX',
+                        {
+                            xray: this.xrayVersion,
+                            singBox: this.singBoxVersion,
+                        },
+                    ),
+                };
+            }
+
+            this.isXrayOnline = false;
+            this.isSingBoxOnline = true;
+            this.runningCore = 'SING_BOX';
+
+            this.logger.log(
+                '\n' +
+                    table(
+                        [
+                            ['Version', this.singBoxVersion],
+                            ['Master IP', ip],
+                        ],
+                        {
+                            header: {
+                                content: 'sing-box started',
+                                alignment: 'center',
+                            },
+                        },
+                    ),
+            );
+
+            return {
+                isOk: true,
+                response: new StartXrayResponseModel(
+                    true,
+                    this.singBoxVersion,
+                    null,
+                    { version: this.nodeVersion },
+                    system,
+                    'SING_BOX',
+                    {
+                        xray: this.xrayVersion,
+                        singBox: this.singBoxVersion,
+                    },
+                ),
+            };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            this.logger.error(`Failed to start sing-box: ${errorMessage}`);
+
+            return {
+                isOk: true,
+                response: new StartXrayResponseModel(
+                    false,
+                    this.singBoxVersion,
+                    errorMessage,
+                    { version: this.nodeVersion },
+                    system,
+                    'SING_BOX',
+                    {
+                        xray: this.xrayVersion,
+                        singBox: this.singBoxVersion,
+                    },
+                ),
+            };
+        } finally {
+            this.logger.log(
+                'Attempt to start sing-box took: ' +
+                    ems(performance.now() - tm, {
+                        extends: 'short',
+                        includeMs: true,
+                    }),
+            );
+            this.isXrayStartedProccesing = false;
+        }
+    }
+
+    private async stopSingBoxProcess(): Promise<void> {
+        try {
+            await this.supervisordApi.stopProcess(SING_BOX_PROCESS_NAME, true);
+            this.logger.log('Supervisord: sing-box process stopped.');
+        } catch (error) {
+            this.logger.log(`Supervisord: No existing sing-box process found. Error: ${error}`);
+        }
+    }
+
+    private async restartSingBoxProcess(): Promise<{
+        processInfo: ProcessInfo | null;
+        error: string | null;
+    }> {
+        try {
+            const processState = await this.supervisordApi.getProcessInfo(SING_BOX_PROCESS_NAME);
+
+            if (processState.state === 20) {
+                await this.supervisordApi.stopProcess(SING_BOX_PROCESS_NAME, true);
+            }
+
+            await this.supervisordApi.startProcess(SING_BOX_PROCESS_NAME, true);
+
+            return {
+                processInfo: await this.supervisordApi.getProcessInfo(SING_BOX_PROCESS_NAME),
+                error: null,
+            };
+        } catch (error) {
+            return {
+                processInfo: null,
+                error: error instanceof Error ? error.message : 'Unknown error',
+            };
+        }
+    }
+
+    private generateSingBoxApiConfig(config: Record<string, unknown>): Record<string, unknown> {
+        const inbounds = Array.isArray(config.inbounds) ? config.inbounds : [];
+        const outbounds = Array.isArray(config.outbounds) ? config.outbounds : [];
+        const statsInbounds: string[] = [];
+        const statsOutbounds: string[] = [];
+        const statsUsers: string[] = [];
+
+        for (const inbound of inbounds) {
+            if (!inbound || typeof inbound !== 'object') continue;
+
+            const item = inbound as {
+                tag?: string;
+                users?: Array<{ name?: string }>;
+            };
+
+            if (item.tag) {
+                statsInbounds.push(item.tag);
+            }
+
+            if (Array.isArray(item.users)) {
+                for (const user of item.users) {
+                    if (user.name) {
+                        statsUsers.push(user.name);
+                    }
+                }
+            }
+        }
+
+        for (const outbound of outbounds) {
+            if (!outbound || typeof outbound !== 'object') continue;
+
+            const item = outbound as { tag?: string };
+            if (item.tag) {
+                statsOutbounds.push(item.tag);
+            }
+        }
+
+        return {
+            ...config,
+            experimental: {
+                ...((config.experimental as Record<string, unknown> | undefined) ?? {}),
+                v2ray_api: {
+                    listen: `127.0.0.1:${this.configService.get<number>('SING_BOX_API_PORT') ?? 61001}`,
+                    stats: {
+                        enabled: true,
+                        inbounds: statsInbounds,
+                        outbounds: statsOutbounds,
+                        users: statsUsers,
+                    },
+                },
+            },
+        };
+    }
+
+    private async getSingBoxVersion(): Promise<null | string> {
+        try {
+            const { stdout } = await execFileAsync(this.singBoxPath, ['version']);
+            const version = semver.valid(semver.coerce(stdout));
+            return version ?? stdout.split('\n')[0]?.trim() ?? null;
+        } catch {
+            return null;
         }
     }
 

@@ -91,6 +91,66 @@ export class InternalService {
         this.logger.log(`User extraction completed in ${result ? result : '0ms'}`);
     }
 
+    public async extractUsersFromSingBoxConfig(
+        hashes: StartXrayCommand.Request['internals']['hashes'],
+        newConfig: Record<string, unknown>,
+    ): Promise<void> {
+        this.cleanup();
+
+        this.emptyConfigHash = hashes.emptyConfig;
+        this.xrayConfig = newConfig;
+
+        this.logger.log(
+            `Starting user extraction from sing-box inbounds... Hash payload: ${JSON.stringify(
+                hashes,
+            )}`,
+        );
+
+        const start = performance.now();
+        const inbounds = newConfig.inbounds;
+        if (Array.isArray(inbounds)) {
+            const validTags = new Set(hashes.inbounds.map((item) => item.tag));
+
+            await pMap(
+                inbounds,
+                async (inbound) => {
+                    if (!inbound || typeof inbound !== 'object') return;
+
+                    const item = inbound as {
+                        tag?: string;
+                        users?: Array<{ name?: string; password?: string }>;
+                    };
+
+                    if (!item.tag || !validTags.has(item.tag)) return;
+
+                    const usersSet = new HashedSet();
+                    if (Array.isArray(item.users)) {
+                        for (const user of item.users) {
+                            if (user.name) {
+                                usersSet.add(user.name);
+                            }
+                        }
+                    }
+
+                    this.inboundsHashMap.set(item.tag, usersSet);
+                },
+                { concurrency: 20 },
+            );
+
+            for (const [inboundTag, usersSet] of this.inboundsHashMap) {
+                this.xtlsConfigInbounds.add(inboundTag);
+                this.logger.log(`${inboundTag} has ${usersSet.size} sing-box users`);
+            }
+        }
+
+        const result = ems(performance.now() - start, {
+            extends: 'short',
+            includeMs: true,
+        });
+
+        this.logger.log(`sing-box user extraction completed in ${result ? result : '0ms'}`);
+    }
+
     public isNeedRestartCore(
         incomingHashes: StartXrayCommand.Request['internals']['hashes'],
     ): boolean {

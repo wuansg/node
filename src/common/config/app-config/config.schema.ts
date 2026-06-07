@@ -17,6 +17,12 @@ export const configSchema = z
         XTLS_API_PORT: z.string().transform((port) => {
             return parseInt(port, 10);
         }),
+        SING_BOX_API_PORT: z
+            .string()
+            .default('61001')
+            .transform((port) => {
+                return parseInt(port, 10);
+            }),
         INTERNAL_REST_TOKEN: z.string(),
         SUPERVISORD_USER: z.string(),
         SUPERVISORD_PASSWORD: z.string(),

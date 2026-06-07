@@ -22,15 +22,19 @@ import {
     GetUsersIpListResponseModel,
     GetUsersStatsResponseModel,
 } from './models';
+import { SingBoxStatsService } from './sing-box/sing-box-stats.service';
 import { GetInterfaceStatsQuery } from '../network-stats/queries/get-interface-stats/get-interface-stats.query';
 import { GetTorrentBlockerReportsCountQuery } from '../_plugin/queries/get-torrent-blocker-reports-count';
 import { IGetUserOnlineStatusRequest } from './interfaces';
+import { XrayService } from '../xray-core/xray.service';
 
 @Injectable()
 export class StatsService {
     constructor(
         @InjectXtls() private readonly xtlsSdk: XtlsApi,
         private readonly queryBus: QueryBus,
+        private readonly xrayService: XrayService,
+        private readonly singBoxStatsService: SingBoxStatsService,
     ) {}
     private readonly logger = new Logger(StatsService.name);
 
@@ -38,6 +42,14 @@ export class StatsService {
         body: IGetUserOnlineStatusRequest,
     ): Promise<ICommandResponse<GetUserOnlineStatusResponseModel>> {
         try {
+            if (this.xrayService.getRunningCore() === 'SING_BOX') {
+                const online = await this.singBoxStatsService.getUserOnlineStatus(body.username);
+                return {
+                    isOk: true,
+                    response: new GetUserOnlineStatusResponseModel(online),
+                };
+            }
+
             const response = await this.xtlsSdk.stats.getUserOnlineStatus(body.username);
 
             if (response.isOk && response.data) {
@@ -62,6 +74,54 @@ export class StatsService {
 
     public async getSystemStats(): Promise<ICommandResponse<GetSystemStatsResponseModel>> {
         try {
+            if (this.xrayService.getRunningCore() === 'SING_BOX') {
+                const interfaceStats = await this.queryBus.execute(new GetInterfaceStatsQuery());
+                const systemStats = getSystemStats();
+                const reportsCount = await this.queryBus.execute(
+                    new GetTorrentBlockerReportsCountQuery(),
+                );
+                const singBoxSysStats = await this.singBoxStatsService.getSysStats();
+
+                return {
+                    isOk: true,
+                    response: new GetSystemStatsResponseModel(
+                        {
+                            numGoroutine:
+                                singBoxSysStats.numGoroutine ??
+                                singBoxSysStats.num_goroutine ??
+                                0,
+                            numGC:
+                                singBoxSysStats.numGC ??
+                                singBoxSysStats.numGc ??
+                                singBoxSysStats.num_gc ??
+                                0,
+                            alloc: singBoxSysStats.alloc ?? 0,
+                            totalAlloc:
+                                singBoxSysStats.totalAlloc ?? singBoxSysStats.total_alloc ?? 0,
+                            sys: singBoxSysStats.sys ?? 0,
+                            mallocs: singBoxSysStats.mallocs ?? 0,
+                            frees: singBoxSysStats.frees ?? 0,
+                            liveObjects:
+                                singBoxSysStats.liveObjects ?? singBoxSysStats.live_objects ?? 0,
+                            pauseTotalNs:
+                                singBoxSysStats.pauseTotalNs ??
+                                singBoxSysStats.pause_total_ns ??
+                                0,
+                            uptime: singBoxSysStats.uptime ?? 0,
+                        },
+                        {
+                            torrentBlocker: {
+                                reportsCount,
+                            },
+                        },
+                        {
+                            ...systemStats,
+                            interface: interfaceStats,
+                        },
+                    ),
+                };
+            }
+
             const response = await this.xtlsSdk.stats.getSysStats();
 
             if (!response.isOk || !response.data) {
@@ -106,6 +166,14 @@ export class StatsService {
         reset: boolean,
     ): Promise<ICommandResponse<GetUsersStatsResponseModel>> {
         try {
+            if (this.xrayService.getRunningCore() === 'SING_BOX') {
+                const users = await this.singBoxStatsService.getAllUsersStats(reset);
+                return {
+                    isOk: true,
+                    response: new GetUsersStatsResponseModel(users),
+                };
+            }
+
             const response = await this.xtlsSdk.stats.getAllUsersStats(reset);
 
             if (!response.isOk || !response.data) {
@@ -148,6 +216,14 @@ export class StatsService {
         reset: boolean,
     ): Promise<ICommandResponse<GetInboundStatsResponseModel>> {
         try {
+            if (this.xrayService.getRunningCore() === 'SING_BOX') {
+                const inbound = await this.singBoxStatsService.getInboundStats(tag, reset);
+                return {
+                    isOk: true,
+                    response: new GetInboundStatsResponseModel(inbound),
+                };
+            }
+
             const response = await this.xtlsSdk.stats.getInboundStats(tag, reset);
 
             if (!response.isOk || !response.data || !response.data.inbound) {
@@ -179,6 +255,14 @@ export class StatsService {
         reset: boolean,
     ): Promise<ICommandResponse<GetOutboundStatsResponseModel>> {
         try {
+            if (this.xrayService.getRunningCore() === 'SING_BOX') {
+                const outbound = await this.singBoxStatsService.getOutboundStats(tag, reset);
+                return {
+                    isOk: true,
+                    response: new GetOutboundStatsResponseModel(outbound),
+                };
+            }
+
             const response = await this.xtlsSdk.stats.getOutboundStats(tag, reset);
 
             if (!response.isOk || !response.data || !response.data.outbound) {
@@ -209,6 +293,14 @@ export class StatsService {
         reset: boolean,
     ): Promise<ICommandResponse<GetAllInboundsStatsResponseModel>> {
         try {
+            if (this.xrayService.getRunningCore() === 'SING_BOX') {
+                const inbounds = await this.singBoxStatsService.getAllInboundStats(reset);
+                return {
+                    isOk: true,
+                    response: new GetAllInboundsStatsResponseModel(inbounds),
+                };
+            }
+
             const response = await this.xtlsSdk.stats.getAllInboundsStats(reset);
 
             if (!response.isOk || !response.data) {
@@ -235,6 +327,14 @@ export class StatsService {
         reset: boolean,
     ): Promise<ICommandResponse<GetAllOutboundsStatsResponseModel>> {
         try {
+            if (this.xrayService.getRunningCore() === 'SING_BOX') {
+                const outbounds = await this.singBoxStatsService.getAllOutboundStats(reset);
+                return {
+                    isOk: true,
+                    response: new GetAllOutboundsStatsResponseModel(outbounds),
+                };
+            }
+
             const response = await this.xtlsSdk.stats.getAllOutboundsStats(reset);
 
             if (!response.isOk || !response.data) {
@@ -262,6 +362,17 @@ export class StatsService {
         reset: boolean,
     ): Promise<ICommandResponse<GetCombinedStatsResponseModel>> {
         try {
+            if (this.xrayService.getRunningCore() === 'SING_BOX') {
+                const [inbounds, outbounds] = await Promise.all([
+                    this.singBoxStatsService.getAllInboundStats(reset),
+                    this.singBoxStatsService.getAllOutboundStats(reset),
+                ]);
+                return {
+                    isOk: true,
+                    response: new GetCombinedStatsResponseModel(inbounds, outbounds),
+                };
+            }
+
             const { isOk: isOkInbounds, data: inboundsData } =
                 await this.xtlsSdk.stats.getAllInboundsStats(reset);
             const { isOk: isOkOutbounds, data: outboundsData } =
@@ -294,6 +405,13 @@ export class StatsService {
         userId: string,
     ): Promise<ICommandResponse<GetUserIpListResponseModel>> {
         try {
+            if (this.xrayService.getRunningCore() === 'SING_BOX') {
+                return {
+                    isOk: true,
+                    response: new GetUserIpListResponseModel([]),
+                };
+            }
+
             const userIps = await this.xtlsSdk.stats.rawClient.getStatsOnlineIpList({
                 name: `user>>>${userId}>>>online`,
                 reset: true,
@@ -326,6 +444,13 @@ export class StatsService {
 
     public async getUsersIpList(): Promise<ICommandResponse<GetUsersIpListResponseModel>> {
         try {
+            if (this.xrayService.getRunningCore() === 'SING_BOX') {
+                return {
+                    isOk: true,
+                    response: new GetUsersIpListResponseModel([]),
+                };
+            }
+
             const { users } = await this.xtlsSdk.stats.rawClient.getAllOnlineUsers({});
 
             const onlineUsers = new Set(users.map((stat) => this.extractOnlineUserId(stat)));

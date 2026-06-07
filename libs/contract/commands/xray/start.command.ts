@@ -5,7 +5,10 @@ import { REST_API } from '../../api';
 
 export namespace StartXrayCommand {
     export const url = REST_API.XRAY.START;
+    export const CoreTypeSchema = z.enum(['XRAY', 'SING_BOX']);
+
     export const RequestSchema = z.object({
+        coreType: CoreTypeSchema.default('XRAY'),
         internals: z.object({
             forceRestart: z.boolean().default(false),
             hashes: z.object({
@@ -19,7 +22,8 @@ export namespace StartXrayCommand {
                 ),
             }),
         }),
-        xrayConfig: z.record(z.unknown()),
+        xrayConfig: z.record(z.unknown()).optional(),
+        singBoxConfig: z.record(z.unknown()).optional(),
     });
 
     export type Request = z.infer<typeof RequestSchema>;
@@ -28,6 +32,13 @@ export namespace StartXrayCommand {
         response: z.object({
             isStarted: z.boolean(),
             version: z.string().nullable(),
+            runningCore: CoreTypeSchema.optional(),
+            coreVersions: z
+                .object({
+                    xray: z.string().nullable(),
+                    singBox: z.string().nullable(),
+                })
+                .optional(),
             error: z.string().nullable(),
             nodeInformation: z.object({
                 version: z.string().nullable(),

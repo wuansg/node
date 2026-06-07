@@ -55,6 +55,14 @@ export XRAY_CORE_VERSION
 echo "[Entrypoint] Xray version: $XRAY_CORE_VERSION"
 echo "[Ports] XTLS_API_PORT: $XTLS_API_PORT"
 
+echo "[Entrypoint] Getting sing-box version..."
+
+SING_BOX_VERSION=$(/usr/local/bin/sing-box version | head -n 1)
+export SING_BOX_VERSION
+
+echo "[Entrypoint] sing-box version: $SING_BOX_VERSION"
+echo "[Ports] SING_BOX_API_PORT: $SING_BOX_API_PORT"
+
 
 
 echo "[Entrypoint] Executing command: $@"
