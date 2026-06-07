@@ -456,6 +456,45 @@ export class XrayService implements OnApplicationBootstrap {
 
             this.isXrayStartedProccesing = true;
 
+            if (
+                this.isSingBoxOnline &&
+                !this.disableHashedSetCheck &&
+                !body.internals.forceRestart
+            ) {
+                const shouldRestart = this.internalService.isNeedRestartCore(body.internals.hashes);
+
+                try {
+                    const processState =
+                        await this.supervisordApi.getProcessInfo(SING_BOX_PROCESS_NAME);
+
+                    if (!shouldRestart && processState.state === 20) {
+                        return {
+                            isOk: true,
+                            response: new StartXrayResponseModel(
+                                true,
+                                this.singBoxVersion,
+                                null,
+                                { version: this.nodeVersion },
+                                system,
+                                'SING_BOX',
+                                {
+                                    xray: this.xrayVersion,
+                                    singBox: this.singBoxVersion,
+                                },
+                            ),
+                        };
+                    }
+
+                    if (processState.state !== 20) {
+                        this.isSingBoxOnline = false;
+                        this.logger.warn(`sing-box process health check failed, restarting...`);
+                    }
+                } catch (error) {
+                    this.isSingBoxOnline = false;
+                    this.logger.warn(`Failed to get sing-box process status, restarting: ${error}`);
+                }
+            }
+
             await this.killAllXrayProcesses();
             const singBoxConfig = this.generateSingBoxApiConfig(body.singBoxConfig);
 
