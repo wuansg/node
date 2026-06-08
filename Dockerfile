@@ -31,7 +31,7 @@ WORKDIR /src
 
 RUN apk add --no-cache git build-base \
     && git clone --depth 1 --branch ${SING_BOX_VERSION} https://github.com/SagerNet/sing-box.git . \
-    && go build -tags "with_v2ray_api" -o /usr/local/bin/sing-box ./cmd/sing-box
+    && go build -tags "with_v2ray_api,with_quic" -o /usr/local/bin/sing-box ./cmd/sing-box
 
 
 FROM node:24.14-alpine
