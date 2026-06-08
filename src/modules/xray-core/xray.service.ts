@@ -36,6 +36,16 @@ import { InternalService } from '../internal/internal.service';
 const XRAY_PROCESS_NAME = 'xray' as const;
 const SING_BOX_PROCESS_NAME = 'sing-box' as const;
 const SING_BOX_CONFIG_PATH = '/run/remnawave/sing-box.json' as const;
+const SING_BOX_KEY_ALIASES: Record<string, string> = {
+    autoDetectInterface: 'auto_detect_interface',
+    certificatePath: 'certificate_path',
+    congestionControl: 'congestion_control',
+    domainSuffix: 'domain_suffix',
+    ipIsPrivate: 'ip_is_private',
+    keyPath: 'key_path',
+    listenPort: 'listen_port',
+    serverPort: 'server_port',
+};
 const execFileAsync = promisify(execFile);
 
 @Injectable()
@@ -497,13 +507,18 @@ export class XrayService implements OnApplicationBootstrap {
 
             await this.killAllXrayProcesses();
             const singBoxConfig = this.generateSingBoxApiConfig(body.singBoxConfig);
+            const normalizedSingBoxConfig = this.normalizeSingBoxConfig(singBoxConfig);
 
             await mkdir('/run/remnawave', { recursive: true });
-            await writeFile(SING_BOX_CONFIG_PATH, JSON.stringify(singBoxConfig), 'utf-8');
+            await writeFile(
+                SING_BOX_CONFIG_PATH,
+                JSON.stringify(normalizedSingBoxConfig),
+                'utf-8',
+            );
 
             await this.internalService.extractUsersFromSingBoxConfig(
                 body.internals.hashes,
-                singBoxConfig,
+                normalizedSingBoxConfig as Record<string, unknown>,
             );
 
             const process = await this.restartSingBoxProcess();
@@ -678,6 +693,23 @@ export class XrayService implements OnApplicationBootstrap {
                 },
             },
         };
+    }
+
+    private normalizeSingBoxConfig(value: unknown): unknown {
+        if (Array.isArray(value)) {
+            return value.map((item) => this.normalizeSingBoxConfig(item));
+        }
+
+        if (!value || typeof value !== 'object') {
+            return value;
+        }
+
+        return Object.fromEntries(
+            Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+                SING_BOX_KEY_ALIASES[key] ?? key,
+                this.normalizeSingBoxConfig(item),
+            ]),
+        );
     }
 
     private async getSingBoxVersion(): Promise<null | string> {
