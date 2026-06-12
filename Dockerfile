@@ -25,7 +25,7 @@ RUN echo '#!/bin/sh' > /usr/local/bin/xerrors \
 
 FROM golang:1.25-alpine AS sing-box-build
 
-ARG SING_BOX_VERSION=v1.12.0
+ARG SING_BOX_VERSION=v1.13.13
 
 WORKDIR /src
 
